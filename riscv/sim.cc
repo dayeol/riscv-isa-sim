@@ -41,6 +41,9 @@ sim_t::sim_t(const char* isa, size_t nprocs, bool halted, reg_t start_pc,
 
   debug_mmu = new mmu_t(this, NULL);
 
+	trng = new trng_t();
+	puf = new puf_t(0xDEADBEEF);
+
   if (hartids.size() == 0) {
     for (size_t i = 0; i < procs.size(); i++) {
       procs[i] = new processor_t(isa, this, i, halted);
@@ -64,6 +67,8 @@ sim_t::~sim_t()
 {
   for (size_t i = 0; i < procs.size(); i++)
     delete procs[i];
+  delete trng;
+  delete puf;
   delete debug_mmu;
 }
 
@@ -322,6 +327,12 @@ void sim_t::make_dtb()
   std::string dtb = dts_compile(dts);
 
   rom.insert(rom.end(), dtb.begin(), dtb.end());
+
+  // <SANCTUM>
+
+  //  rom.insert(rom.end(), bootloader.begin(), bootloader.end());
+  // </SANCTUM>
+
   const int align = 0x1000;
   rom.resize((rom.size() + align - 1) / align * align);
 

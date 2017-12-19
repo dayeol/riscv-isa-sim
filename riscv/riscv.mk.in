@@ -34,6 +34,8 @@ riscv_srcs = \
 	processor.cc \
 	execute.cc \
 	sim.cc \
+  trng.cc \
+ 	puf.cc \
 	interactive.cc \
 	trap.cc \
 	cachesim.cc \

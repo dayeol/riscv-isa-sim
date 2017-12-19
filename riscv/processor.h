@@ -101,6 +101,65 @@ struct state_t
   reg_t mscratch;
   reg_t mtvec;
   reg_t mcause;
+
+  // <SANCTUM>
+    // ## The core state referenced by various CSRs (registers) introduced by Sanctum is declared here.
+
+    // ### Enclave virtual base and mask
+    // (per-core) registers
+    // ( defines a virtual region for which enclave page tables are used in
+    //   place of OS-controlled page tables)
+    // (machine-mode non-standard read/write)
+    reg_t mevbase;
+    reg_t mevmask;
+
+    // ### Enclave page table base
+    // (per core) register
+    // ( pointer to a separate page table data structure used to translate enclave
+    //   virtual addresses)
+    // (machine-mode non-standard read/write)
+    reg_t meptbr;
+
+    // ### DRAM bitmap
+    // (per core) registers (OS and Enclave)
+    // ( white-lists the DRAM regions the core is allowed to access via OS and
+    //   enclave virtual addresses)
+    // (machine-mode non-standard read/write)
+    reg_t mdrbmap;
+    reg_t medrbmap;
+
+    // ### Protected region base and mask
+    // (per core) registers (OS and Enclave)
+    // ( these are used to prevent address translation into a specific range of
+    //   physical addresses, for example to protect the security monitor from all software)
+    // (machine-mode non-standard read/write)
+    reg_t mparbase;
+    reg_t mparmask;
+    reg_t meparbase;
+    reg_t meparmask;
+
+    // ### DMA base and mask:
+    // (system-wide) register
+    // (machine-mode non-standard read/write)
+    // TODO: These should be a system-wide CSR; declare elsewhere
+    reg_t mdmabase;
+    reg_t mdmamask;
+    // ### TRNG (random number generator)
+    // (user-mode non-standard read-only)
+    // (per core) register
+    // This is not a stateful element; declared elsewhere:
+    // sim->trng->read()
+    // ### PUF (physical unclonable function)
+    // (system-wide) registers
+    // (machine-mode non-standard read/write)
+    // These are be a system-wide CSR; declared elsewhere:
+    // sim->puf->select
+    // sim->puf->disable
+    // (machine-mode non-standard read-only)
+    // sim->puf->readout()
+    // Check priv-1.10 spec to make sure we can't use memory protection for some of this
+  // </SANCTUM>
+
   reg_t minstret;
   reg_t mie;
   reg_t mip;

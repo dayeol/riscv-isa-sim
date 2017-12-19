@@ -6,6 +6,8 @@
 #include "processor.h"
 #include "devices.h"
 #include "debug_module.h"
+#include "puf.h"
+#include "trng.h"
 #include <fesvr/htif.h>
 #include <fesvr/context.h>
 #include <vector>
@@ -43,6 +45,8 @@ public:
 private:
   std::vector<std::pair<reg_t, mem_t*>> mems;
   mmu_t* debug_mmu;  // debug port into main memory
+  trng_t* trng;
+  puf_t* puf;
   std::vector<processor_t*> procs;
   reg_t start_pc;
   std::string dts;

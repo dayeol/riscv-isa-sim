@@ -159,7 +159,27 @@ tlb_entry_t mmu_t::refill_tlb(reg_t vaddr, reg_t paddr, char* host_addr, access_
 
 reg_t mmu_t::walk(reg_t addr, access_type type, reg_t mode)
 {
-  vm_info vm = decode_vm_info(proc->max_xlen, mode, proc->get_state()->satp);
+  // <SANCTUM>
+    // Enclave virtual addresses use a different page table root than OS addresses
+    vm_info osvm = decode_vm_info(proc->max_xlen, mode, proc->get_state()->satp);
+    vm_info evm = decode_vm_info(proc->max_xlen, mode, proc->get_state()->meptbr);
+
+    // Is this an enclave virtual address?
+    bool is_enclave_address = ((addr & proc->get_state()->mevmask) == proc->get_state()->mevbase);
+
+    // Select appropriate fields for the page walker based on Enclave vs OS access.
+    vm_info vm = (is_enclave_address ? evm : osvm);
+    reg_t dram_bitmap = (is_enclave_address ? proc->get_state()->medrbmap
+                                            : proc->get_state()->mdrbmap);
+    reg_t protected_region_base = (is_enclave_address ? proc->get_state()->meparbase
+                                                      : proc->get_state()->mparbase);
+    reg_t protected_region_mask = (is_enclave_address ? proc->get_state()->meparmask
+                                                      : proc->get_state()->mparmask);
+
+    // TODO:
+    // - Make sure an OS cannot write its own sptbr at will - rely on priv1-10 for that.
+  // </SANCTUM>
+
   if (vm.levels == 0)
     return addr & ((reg_t(2) << (proc->xlen-1))-1); // zero-extend from xlen
 
@@ -187,8 +207,42 @@ reg_t mmu_t::walk(reg_t addr, access_type type, reg_t mode)
     reg_t pte = vm.ptesize == 4 ? *(uint32_t*)ppte : *(uint64_t*)ppte;
     reg_t ppn = pte >> PTE_PPN_SHIFT;
 
-    if (PTE_TABLE(pte)) { // next level of page table
+    // <SANCTUM>
+      // Enforce additional invariants on the result of each page table entry lookup!
       base = ppn << PGSHIFT;
+      reg_t next_addr = (base + idx * vm.ptesize);
+      // Page table entry must *not* fall into the protected address range
+      // TODO: convince myself that this aligns with superpage boundaries
+      if ((next_addr & protected_region_mask) == protected_region_base)
+        throw trap_load_access_fault(addr);
+
+      // Page table entry must fall into a white-listed DRAM region
+      //   and HW requires them to be aligned
+      // TODO: this depends on a total amount of memory!
+      // simulator and u500 both have 1GB of RAM
+      // 64 DRAM regions imply 16 MiB regions
+      // 24 bits of region offset
+      // 4 KiB pages, 2 MiB megapages fall *within one region*
+      // 1 GiB gigapages cover *all* regions.
+      // 515 GiB terapages also cover *all* regions.
+      // terapages  are available in Sv48 in the simulator, but not in Sv39 on u500
+      // NOTE: this implementation hard-wires the region mapping
+      // The LLC must have 64*4 KiB banks, but can be set associative to an arbitrary degree.
+      reg_t addr_region_oh = 0xFFFFFFFFFFFFFFFF; // Default for the 1 GiB page, which covers all DRAM
+      if (i < 2) { // In all cases
+        addr_region_oh = (0b1 << (0x3F & (base >> 24)));
+      }
+
+      // If the address mapping is not white-listed by the selected DRAM bitmap, a fault should occur
+      if (0 == (addr_region_oh & dram_bitmap))
+        throw trap_load_access_fault(addr);
+
+      //if (0 == ((0b1 << ((base >> 58) & 0x3F)) & dram_bitmap))
+
+    // </SANCTUM>
+
+    if (PTE_TABLE(pte)) { // next level of page table
+      // Nothing todo; will look up next PTE in the next iteration
     } else if ((pte & PTE_U) ? s_mode && (type == FETCH || !sum) : !s_mode) {
       break;
     } else if (!(pte & PTE_V) || (!(pte & PTE_R) && (pte & PTE_W))) {

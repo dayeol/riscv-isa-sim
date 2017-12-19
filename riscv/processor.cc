@@ -6,6 +6,8 @@
 #include "config.h"
 #include "sim.h"
 #include "mmu.h"
+#include "puf.h"
+#include "trng.h"
 #include "disasm.h"
 #include <cinttypes>
 #include <cmath>
@@ -150,6 +152,64 @@ void processor_t::reset()
   state.dcsr.halt = halt_on_reset;
   halt_on_reset = false;
   set_csr(CSR_MSTATUS, state.mstatus);
+
+  // <SANCTUM>
+    // ## The initial values of various CSRs (registers) introduced by Sanctum are given here.
+
+    // ### Enclave virtual base and mask
+    // (per-core) registers
+    // ( defines a virtual region for which enclave page tables are used in
+    //   place of OS-controlled page tables)
+    // (machine-mode non-standard read/write)
+    set_csr(CSR_MEVBASE, 0xFFFFFFFFFFFFFFFF); // No addresses will fall into EVRange
+    set_csr(CSR_MEVMASK, 0);
+
+    // ### Enclave page table base
+    // (per core) register
+    // ( pointer to a separate page table data structure used to translate enclave
+    //   virtual addresses)
+    // (machine-mode non-standard read/write)
+    set_csr(CSR_MEPTBR, 0); // Enclave page table is irrelevant initially
+
+    // ### DRAM bitmap
+    // (per core) registers (OS and Enclave)
+    // ( white-lists the DRAM regions the core is allowed to access via OS and
+    //   enclave virtual addresses)
+    // (machine-mode non-standard read/write)
+    set_csr(CSR_MDRBMAP, 0xFFFFFFFFFFFFFFFF); // All regions initially belong to the OS
+    set_csr(CSR_MEDRBMAP, 0); // Enclave regions are irrelevant initially
+
+    // ### Protected region base and mask
+    // (per core) registers (OS and Enclave)
+    // ( these are used to prevent address translation into a specific range of
+    //   physical addresses, for example to protect the security monitor from all software)
+    // (machine-mode non-standard read/write)
+    set_csr(CSR_MPARBASE, 0xFFFFFFFFFFFFFFFF); // No addresses will fall into PAR
+    set_csr(CSR_MPARMASK, 0);
+    set_csr(CSR_MEPARBASE, 0); // Enclave protected region is irrelevant initially
+    set_csr(CSR_MEPARMASK, 0);
+
+    // ### DMA base and mask:
+    // (system-wide) register
+    // (machine-mode non-standard read/write)
+    // TODO: These should be a system-wide CSR; declare elsewhere
+    // TODO: This should be initially an empty set, to be explicitly white-listed
+    // TODO: currently unused for compatibility
+    set_csr(CSR_MDMABASE, 0); // All addresses initially allowed for DMA
+    set_csr(CSR_MDMAMASK, 0xFFFFFFFFFFFFFFFF);
+    // ### TRNG (random number generator)
+    // (user-mode non-standard read-only)
+    // (per core) register
+    /* CSR_TRNG is READONLY */
+    // ### PUF (physical unclonable function)
+    // (system-wide) registers
+    // (machine-mode non-standard read/write)
+    sim->puf->select = 0;
+    sim->puf->disable = 0; // Initially, the PUF is not disabled
+    // (machine-mode non-standard read-only)
+    /* CSR_MPUFREADOUT is READONLY */
+    // Check priv-1.10 spec to make sure we can't use memory protection for some of this
+  // </SANCTUM>
 
   if (ext)
     ext->reset(); // reset the extension
@@ -443,6 +503,74 @@ void processor_t::set_csr(int which, reg_t val)
     case CSR_MEPC: state.mepc = val; break;
     case CSR_MTVEC: state.mtvec = val & ~(reg_t)2; break;
     case CSR_MSCRATCH: state.mscratch = val; break;
+
+    // <SANCTUM>
+      // ## The write behavior for various CSRs (registers) introduced by Sanctum is defined here.
+
+      // ### Enclave virtual base and mask
+      // (per-core) registers
+      // ( defines a virtual region for which enclave page tables are used in
+      //   place of OS-controlled page tables)
+      // (machine-mode non-standard read/write)
+      case CSR_MEVBASE: state.mevbase = val; break;
+      case CSR_MEVMASK: state.mevmask = val; break;
+
+      // ### Enclave page table base
+      // (per core) register
+      // ( pointer to a separate page table data structure used to translate enclave
+      //   virtual addresses)
+      // (machine-mode non-standard read/write)
+      case CSR_MEPTBR: {
+        mmu->flush_tlb();
+        if (max_xlen == 32)
+          state.meptbr = val & (SPTBR32_PPN | SPTBR32_MODE);
+        if (max_xlen == 64 && (get_field(val, SPTBR64_MODE) == SPTBR_MODE_OFF ||
+                               get_field(val, SPTBR64_MODE) == SPTBR_MODE_SV39 ||
+                               get_field(val, SPTBR64_MODE) == SPTBR_MODE_SV48))
+          state.meptbr = val & (SPTBR64_PPN | SPTBR64_MODE);
+        break;
+      }
+
+      // ### DRAM bitmap
+      // (per core) registers (OS and Enclave)
+      // ( white-lists the DRAM regions the core is allowed to access via OS and
+      //   enclave virtual addresses)
+      // (machine-mode non-standard read/write)
+      case CSR_MDRBMAP: state.mdrbmap = val; break;
+      case CSR_MEDRBMAP: state.medrbmap = val; break;
+
+      // ### Protected region base and mask
+      // (per core) registers (OS and Enclave)
+      // ( these are used to prevent address translation into a specific range of
+      //   physical addresses, for example to protect the security monitor from all software)
+      // (machine-mode non-standard read/write)
+      case CSR_MPARBASE: state.mparbase = val; break;
+      case CSR_MPARMASK: state.mparmask = val; break;
+      case CSR_MEPARBASE: state.meparbase = val; break;
+      case CSR_MEPARMASK: state.meparmask = val; break;
+
+      // ### DMA base and mask:
+      // (system-wide) register
+      // (machine-mode non-standard read/write)
+      // TODO: These should be a system-wide CSR; declare elsewhere
+      // TODO: What is the right way to hook CSR writes up to shared resources? A queue? A level crossing? --> OR?
+      // TODO: What is the right way to hook CSR reads up to shared resources? A queue? A level crossing?
+      case CSR_MDMABASE: state.mdmabase = val; break;
+      case CSR_MDMAMASK: state.mdmamask = val; break;
+      // ### TRNG (random number generator)
+      // (user-mode non-standard read-only)
+      // (per core) register
+      case CSR_TRNG: /* READONLY */ break;
+      // ### PUF (physical unclonable function)
+      // (system-wide) registers
+      // (machine-mode non-standard read/write)
+      case CSR_MPUFSELECT: sim->puf->select = val; break;
+      case CSR_MPUFDISABLE: sim->puf->disable = (sim->puf->disable | (val & 0x1)); break; // Set only!
+      // (machine-mode non-standard read-only)
+      case CSR_MPUFREADOUT: /* READONLY */ break;
+      // Check priv-1.10 spec to make sure we can't use memory protection for some of this
+    // </SANCTUM>
+
     case CSR_MCAUSE: state.mcause = val; break;
     case CSR_MTVAL: state.mtval = val; break;
     case CSR_MISA: {
@@ -600,6 +728,63 @@ reg_t processor_t::get_csr(int which)
     case CSR_MIE: return state.mie;
     case CSR_MEPC: return state.mepc;
     case CSR_MSCRATCH: return state.mscratch;
+
+    // <SANCTUM>
+      // ## The read behavior for various CSRs (registers) introduced by Sanctum is defined here.
+
+      // ### Enclave virtual base and mask
+      // (per-core) registers
+      // ( defines a virtual region for which enclave page tables are used in
+      //   place of OS-controlled page tables)
+      // (machine-mode non-standard read/write)
+      case CSR_MEVBASE: return state.mevbase;
+      case CSR_MEVMASK: return state.mevmask;
+
+      // ### Enclave page table base
+      // (per core) register
+      // ( pointer to a separate page table data structure used to translate enclave
+      //   virtual addresses)
+      // (machine-mode non-standard read/write)
+      case CSR_MEPTBR: return state.meptbr;
+
+      // ### DRAM bitmap
+      // (per core) registers (OS and Enclave)
+      // ( white-lists the DRAM regions the core is allowed to access via OS and
+      //   enclave virtual addresses)
+      // (machine-mode non-standard read/write)
+      case CSR_MDRBMAP: return state.mdrbmap;
+      case CSR_MEDRBMAP: return state.medrbmap;
+
+      // ### Protected region base and mask
+      // (per core) registers (OS and Enclave)
+      // ( these are used to prevent address translation into a specific range of
+      //   physical addresses, for example to protect the security monitor from all software)
+      // (machine-mode non-standard read/write)
+      case CSR_MPARBASE: return state.mparbase;
+      case CSR_MPARMASK: return state.mparmask;
+      case CSR_MEPARBASE: return state.meparbase;
+      case CSR_MEPARMASK: return state.meparmask;
+
+      // ### DMA base and mask:
+      // (system-wide) register
+      // (machine-mode non-standard read/write)
+      // TODO: These should be a system-wide CSR; declare elsewhere
+      case CSR_MDMABASE: return state.mdmabase;
+      case CSR_MDMAMASK: return state.mdmamask;
+      // ### TRNG (random number generator)
+      // (user-mode non-standard read-only)
+      // (per core) register
+      case CSR_TRNG: sim->trng->read();
+      // ### PUF (physical unclonable function)
+      // (system-wide) registers
+      // (machine-mode non-standard read/write)
+      case CSR_MPUFSELECT: return sim->puf->select;
+      case CSR_MPUFDISABLE: return sim->puf->disable;
+      // (machine-mode non-standard read-only)
+      case CSR_MPUFREADOUT: return sim->puf->readout();
+      // Check priv-1.10 spec to make sure we can't use memory protection for some of this
+    // </SANCTUM>
+
     case CSR_MCAUSE: return state.mcause;
     case CSR_MTVAL: return state.mtval;
     case CSR_MISA: return isa;
