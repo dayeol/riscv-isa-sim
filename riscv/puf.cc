@@ -9,6 +9,8 @@ puf_t::puf_t (uint64_t identity) {
   }
   select = 0;
   disable = 0;
+  reset = 0;
+  cycles = 0;
 }
 
 puf_t::~puf_t ( void ) {

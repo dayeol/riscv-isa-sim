@@ -25,6 +25,9 @@ static void handle_signal(int sig)
 
 sim_t::sim_t(const char* isa, size_t nprocs, bool halted, reg_t start_pc,
              std::vector<std::pair<reg_t, mem_t*>> mems,
+             // <SANCTUM>
+             const char* bootloader_file,
+             // </SANCTUM>
              const std::vector<std::string>& args,
              std::vector<int> const hartids, unsigned progsize)
   : htif_t(args), debug_module(this, progsize), mems(mems),
@@ -58,6 +61,22 @@ sim_t::sim_t(const char* isa, size_t nprocs, bool halted, reg_t start_pc,
       procs[i] = new processor_t(isa, this, hartids[i], halted);
     }
   }
+
+  // <SANCTUM>
+  bootloader_binary.clear();
+  if(bootloader_file[0] != '\0') { // is the bootloader_file string something other than "" ?
+    std::ifstream file(bootloader_file, std::ios::binary);
+    file.unsetf(std::ios::skipws); // don't omit newline bytes
+    std::streampos file_size;
+    file.seekg(0, std::ios::end);
+    file_size = file.tellg();
+    file.seekg(0, std::ios::beg);
+    bootloader_binary.reserve(file_size);
+    bootloader_binary.insert(bootloader_binary.begin(),
+                             std::istream_iterator<unsigned char>(file),
+                             std::istream_iterator<unsigned char>());
+  }
+  // </SANCTUM>
 
   clint.reset(new clint_t(procs));
   bus.add_device(CLINT_BASE, clint.get());
@@ -253,15 +272,19 @@ void sim_t::make_dtb()
     0x28593 + (reset_vec_size * 4 << 20),       // addi   a1, t0, &dtb
     0xf1402573,                                 // csrr   a0, mhartid
     get_core(0)->xlen == 32 ?
-      0x0182a283u :                             // lw     t0,24(t0)
-      0x0182b283u,                              // ld     t0,24(t0)
+      0x0182a283u :                             // lw     t0,24(t0) <-- OR jump to bootloader segment
+      0x0182b283u,                              // ld     t0,24(t0) <-- OR jump to bootloader segment
+                                                // j sizeof(rom)-3      (if bootloader segment if present)
     0x28067,                                    // jr     t0
     0,
-    (uint32_t) (start_pc & 0xffffffff),
+    (uint32_t) (start_pc & 0xffffffff),         // this will remain unused if a bootloader segment is given
     (uint32_t) (start_pc >> 32)
   };
 
-  std::vector<char> rom((char*)reset_vec, (char*)reset_vec + sizeof(reset_vec));
+  // <SANCTUM>
+  // std::vector<char> rom((char*)reset_vec, (char*)reset_vec + sizeof(reset_vec));
+  // Make the DTS before writing the reset vector : need sizeof(dts) to compute bootloader offset
+  // </SANCTUM>
 
   std::stringstream s;
   s << std::dec <<
@@ -326,14 +349,30 @@ void sim_t::make_dtb()
   dts = s.str();
   std::string dtb = dts_compile(dts);
 
-  rom.insert(rom.end(), dtb.begin(), dtb.end());
-
   // <SANCTUM>
+  // Populate the boot ROM
+  std::vector<char> rom((char*)reset_vec, (char*)reset_vec + sizeof(reset_vec));
+  rom.insert(rom.end(), dtb.begin(), dtb.end());
+  if (!bootloader_binary.empty()) {
+    // if a bootloader segment is given,
+    // add some bytes to the rom if needed to align the bootloader to a word boundary.
+    while ((rom.size() % 4) != 0) { rom.push_back(0x00); }
 
-  //  rom.insert(rom.end(), bootloader.begin(), bootloader.end());
+    // Construct an instruction: j (sizeof(rom)-3) (jal with rd=0)
+    uint32_t offset = rom.size()-12;
+    uint32_t jump_instruction = (((offset >> 1) & 0x3FF) << 21) | (((offset>>11) & 0x1) << 20) | (((offset>>12) & 0xFF) << 12) | (((offset>>20) & 0x1) << 31) | (0 << 7) | (0x6F << 0);
+
+    rom[15] = ((jump_instruction >> 24) & 0xFF);
+    rom[14] = ((jump_instruction >> 16) & 0xFF);
+    rom[13] = ((jump_instruction >> 8) & 0xFF);
+    rom[12] = ((jump_instruction >> 0) & 0xFF);
+    // Add bootloader segemtnt to ROM
+
+    rom.insert(rom.end(), bootloader_binary.begin(), bootloader_binary.end());
+  }
   // </SANCTUM>
 
-  const int align = 0x1000;
+  const int align = 0x10000;
   rom.resize((rom.size() + align - 1) / align * align);
 
   boot_rom.reset(new rom_device_t(rom));

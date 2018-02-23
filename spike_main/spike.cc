@@ -32,6 +32,10 @@ static void help()
   fprintf(stderr, "  --ic=<S>:<W>:<B>      Instantiate a cache model with S sets,\n");
   fprintf(stderr, "  --dc=<S>:<W>:<B>        W ways, and B-byte blocks (with S and\n");
   fprintf(stderr, "  --l2=<S>:<W>:<B>        B both powers of 2).\n");
+  // <SANCTUM>
+  fprintf(stderr, "  --bootloader=<path/to/bootloader>\n");
+  fprintf(stderr, "                          bootloader segment binary\n");
+  // </SANCTUM>
   fprintf(stderr, "  --extension=<name>    Specify RoCC Extension\n");
   fprintf(stderr, "  --extlib=<name>       Shared library to load\n");
   fprintf(stderr, "  --rbb-port=<port>     Listen on <port> for remote bitbang connection\n");
@@ -84,6 +88,7 @@ int main(int argc, char** argv)
   std::unique_ptr<cache_sim_t> l2;
   std::function<extension_t*()> extension;
   const char* isa = DEFAULT_ISA;
+  const char* bootloader_file = "";
   uint16_t rbb_port = 0;
   bool use_rbb = false;
   unsigned progsize = 2;
@@ -117,6 +122,9 @@ int main(int argc, char** argv)
   parser.option(0, "ic", 1, [&](const char* s){ic.reset(new icache_sim_t(s));});
   parser.option(0, "dc", 1, [&](const char* s){dc.reset(new dcache_sim_t(s));});
   parser.option(0, "l2", 1, [&](const char* s){l2.reset(cache_sim_t::construct(s, "L2$"));});
+  // <SANCTUM>
+  parser.option(0, "bootloader", 1, [&](const char* s){bootloader_file = s;});
+  // </SANCTUM>
   parser.option(0, "isa", 1, [&](const char* s){isa = s;});
   parser.option(0, "extension", 1, [&](const char* s){extension = find_extension(s);});
   parser.option(0, "dump-dts", 0, [&](const char *s){dump_dts = true;});
@@ -134,7 +142,11 @@ int main(int argc, char** argv)
   if (mems.empty())
     mems = make_mems("2048");
 
-  sim_t s(isa, nprocs, halted, start_pc, mems, htif_args, std::move(hartids),
+  sim_t s(isa, nprocs, halted, start_pc, mems, 
+    	// <SANCTUM>
+    	bootloader_file,
+    	// </SANCTUM>
+			htif_args, std::move(hartids),
       progsize);
   std::unique_ptr<remote_bitbang_t> remote_bitbang((remote_bitbang_t *) NULL);
   std::unique_ptr<jtag_dtm_t> jtag_dtm(new jtag_dtm_t(&s.debug_module));

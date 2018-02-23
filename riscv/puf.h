@@ -15,6 +15,8 @@ public:
 
   reg_t select;
   reg_t disable;
+  reg_t reset;
+  reg_t cycles;
 
 private:
   reg_t* puf_values;

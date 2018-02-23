@@ -206,6 +206,8 @@ void processor_t::reset()
     // (machine-mode non-standard read/write)
     sim->puf->select = 0;
     sim->puf->disable = 0; // Initially, the PUF is not disabled
+    sim->puf->reset = 0; // Initially, the PUF is not reset
+    sim->puf->cycles = 0; // Initially, the PUF is run for 0 cycles
     // (machine-mode non-standard read-only)
     /* CSR_MPUFREADOUT is READONLY */
     // Check priv-1.10 spec to make sure we can't use memory protection for some of this
@@ -566,6 +568,8 @@ void processor_t::set_csr(int which, reg_t val)
       // (machine-mode non-standard read/write)
       case CSR_MPUFSELECT: sim->puf->select = val; break;
       case CSR_MPUFDISABLE: sim->puf->disable = (sim->puf->disable | (val & 0x1)); break; // Set only!
+      case CSR_MPUFRESET: sim->puf->reset = (val!=0); break;
+      case CSR_MPUFCYCLES: sim->puf->cycles = val; break;
       // (machine-mode non-standard read-only)
       case CSR_MPUFREADOUT: /* READONLY */ break;
       // Check priv-1.10 spec to make sure we can't use memory protection for some of this
@@ -780,6 +784,8 @@ reg_t processor_t::get_csr(int which)
       // (machine-mode non-standard read/write)
       case CSR_MPUFSELECT: return sim->puf->select;
       case CSR_MPUFDISABLE: return sim->puf->disable;
+      case CSR_MPUFRESET: return sim->puf->reset;
+      case CSR_MPUFCYCLES: return sim->puf->cycles;
       // (machine-mode non-standard read-only)
       case CSR_MPUFREADOUT: return sim->puf->readout();
       // Check priv-1.10 spec to make sure we can't use memory protection for some of this

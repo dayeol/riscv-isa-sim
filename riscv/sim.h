@@ -13,6 +13,8 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <fstream>
+#include <iterator>
 
 class mmu_t;
 class remote_bitbang_t;
@@ -23,6 +25,9 @@ class sim_t : public htif_t
 public:
   sim_t(const char* isa, size_t _nprocs,  bool halted, reg_t start_pc,
         std::vector<std::pair<reg_t, mem_t*>> mems,
+        // <SANCTUM>
+        const char* bootloader_file,
+        // </SANCTUM>
         const std::vector<std::string>& args, const std::vector<int> hartids,
         unsigned progsize);
   ~sim_t();
@@ -50,6 +55,7 @@ private:
   std::vector<processor_t*> procs;
   reg_t start_pc;
   std::string dts;
+  std::vector<unsigned char> bootloader_binary;
   std::unique_ptr<rom_device_t> boot_rom;
   std::unique_ptr<clint_t> clint;
   bus_t bus;

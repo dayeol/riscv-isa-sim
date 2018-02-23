@@ -852,6 +852,8 @@
   // (machine-mode non-standard read/write)
   #define CSR_MPUFSELECT 0x7cb
   #define CSR_MPUFDISABLE 0x7cc
+  #define CSR_MPUFRESET 0x7cd
+  #define CSR_MPUFCYCLES 0x7ce
   // (machine-mode non-standard read-only)
   #define CSR_MPUFREADOUT 0xfc0
   // Check priv-1.10 spec to make sure we can't use memory protection for some of this
@@ -1400,6 +1402,8 @@ DECLARE_CSR(mscratch, CSR_MSCRATCH)
   // (machine-mode non-standard read/write)
   DECLARE_CSR(mpufselect, CSR_MPUFSELECT)
   DECLARE_CSR(mpufdisable, CSR_MPUFDISABLE)
+  DECLARE_CSR(mpufreset, CSR_MPUFRESET)
+  DECLARE_CSR(mpufcycles, CSR_MPUFCYCLES)
   // (machine-mode non-standard read-only)
   DECLARE_CSR(mpufreadout, CSR_MPUFREADOUT)
   // Check priv-1.10 spec to make sure we can't use memory protection for some of this
